@@ -1,0 +1,86 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Get short SHA
+      id: sha
+      run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+    
+    - name: Build all platforms
+      env:
+        CGO_ENABLED: 0
+      run: |
+        mkdir -p dist
+        VERSION="xks-${{ steps.sha.outputs.SHORT_SHA }}"
+        LDFLAGS="-X main.version=${VERSION} -s -w"
+              
+        # Linux AMD64
+        GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/xks-linux-amd64 .
+        
+        # Linux ARM64
+        GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/xks-linux-arm64 .
+        
+        # macOS AMD64
+        GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/xks-darwin-amd64 .
+        
+        # macOS ARM64
+        GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/xks-darwin-arm64 .
+        
+        # Windows AMD64
+        GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/xks-windows-amd64.exe .
+    
+    - name: Create archives
+      run: |
+        cd dist
+        for binary in xks-*; do
+          if [[ "$binary" == *.exe ]]; then
+            zip "${binary}-${{ steps.sha.outputs.SHORT_SHA }}.zip" "$binary"
+          else
+            tar -czf "${binary}-${{ steps.sha.outputs.SHORT_SHA }}.tar.gz" "$binary"
+          fi
+        done
+        
+    - name: Create manual release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: xks-${{ steps.sha.outputs.SHORT_SHA }}
+        name: Manual Build (xks-${{ steps.sha.outputs.SHORT_SHA }})
+        body: |
+          🚧 ** Manual Build ** 🚧
+          
+          This is an automated Manual Build from the `main` branch.
+          
+          **Commit**: ${{ github.sha }}
+          **Branch**: main
+          **Built**: ${{ github.run_number }}
+          
+          ⚠️ ** Warning **: This is a Manual Build and may be unstable. Use at your own risk.
+          
+          ### Downloads
+          - **Linux AMD64**: `xks-linux-amd64-${{ steps.sha.outputs.SHORT_SHA }}.tar.gz`
+          - **Linux ARM64**: `xks-linux-arm64-${{ steps.sha.outputs.SHORT_SHA }}.tar.gz`
+          - **macOS AMD64**: `xks-darwin-amd64-${{ steps.sha.outputs.SHORT_SHA }}.tar.gz`
+          - **macOS ARM64**: `xks-darwin-arm64-${{ steps.sha.outputs.SHORT_SHA }}.tar.gz`
+          - **Windows AMD64**: `xks-windows-amd64-${{ steps.sha.outputs.SHORT_SHA }}.zip`
+        files: dist/*.tar.gz,dist/*.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
