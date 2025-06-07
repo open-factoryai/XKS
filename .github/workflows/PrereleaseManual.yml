@@ -1,0 +1,95 @@
+name: Manual Prerelease
+
+on:
+  push:
+    branches: [ develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-prerelease:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Get short SHA
+      id: sha
+      run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+    
+    - name: Build all platforms
+      env:
+        CGO_ENABLED: 0
+      run: |
+        mkdir -p dist
+        VERSION="xks-${{ steps.sha.outputs.SHORT_SHA }}"
+        LDFLAGS="-X main.version=${VERSION} -s -w"
+              
+        # Linux AMD64
+        GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/xks-linux-amd64 .
+        
+        # Linux ARM64
+        GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/xks-linux-arm64 .
+        
+        # macOS AMD64
+        GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/xks-darwin-amd64 .
+        
+        # macOS ARM64
+        GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/xks-darwin-arm64 .
+        
+        # Windows AMD64
+        GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/xks-windows-amd64.exe .
+    
+    - name: Create archives
+      run: |
+        cd dist
+        for binary in xks-*; do
+          if [[ "$binary" == *.exe ]]; then
+            zip "${binary}-dev-${{ steps.sha.outputs.SHORT_SHA }}.zip" "$binary"
+          else
+            tar -czf "${binary}-dev-${{ steps.sha.outputs.SHORT_SHA }}.tar.gz" "$binary"
+          fi
+        done
+    
+    - name: Delete old dev releases
+      run: |
+        # Delete old dev releases (keep last 5)
+        gh release list --limit 50 | grep "dev-" | tail -n +6 | cut -f1 | xargs -I {} gh release delete {} --yes || true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Create manual prerelease
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: dev-${{ steps.sha.outputs.SHORT_SHA }}
+        name: Development Build (dev-${{ steps.sha.outputs.SHORT_SHA }})
+        body: |
+          🚧 ** Development Build ** 🚧
+          
+          This is an automated Manual Build from the `develop` branch.
+          
+          **Commit**: ${{ github.sha }}
+          **Branch**: main
+          **Built**: ${{ github.run_number }}
+          
+          ⚠️ This is a development build and may be unstable. Use at your own risk.
+
+          ### Downloads
+          - **Linux AMD64**: `xks-linux-amd64-dev-${{ steps.sha.outputs.SHORT_SHA }}.tar.gz`
+          - **Linux ARM64**: `xks-linux-arm64-dev-${{ steps.sha.outputs.SHORT_SHA }}.tar.gz`
+          - **macOS AMD64**: `xks-darwin-amd64-dev-${{ steps.sha.outputs.SHORT_SHA }}.tar.gz`
+          - **macOS ARM64**: `xks-darwin-arm64-dev-${{ steps.sha.outputs.SHORT_SHA }}.tar.gz`
+          - **Windows AMD64**: `xks-windows-amd64-dev-${{ steps.sha.outputs.SHORT_SHA }}.zip`
+        files: dist/*.tar.gz,dist/*.zip
+        draft: false
+        prerelease: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
