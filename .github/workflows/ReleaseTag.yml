@@ -61,6 +61,9 @@ jobs:
       contents: read
       security-events: write
     continue-on-error: true
+    outputs:
+      security-summary: ${{ steps.security-report.outputs.summary }}
+      security-details: ${{ steps.security-report.outputs.details }}
     steps:
     - name: Check out code
       uses: actions/checkout@v4
@@ -72,15 +75,64 @@ jobs:
         cache: true
 
     - name: Run Gosec Security Scanner
+      id: gosec
       run: |
-        # Install gosec with correct import path
+        # Install gosec
         go install github.com/securego/gosec/v2/cmd/gosec@latest
         
-        # Run gosec and generate reports
+        # Run gosec et capture les résultats
         gosec -no-fail -fmt json -out results.json ./... || echo "Gosec completed with warnings"
-        
-        # Also create SARIF format for GitHub integration
         gosec -no-fail -fmt sarif -out results.sarif ./... || echo "SARIF generation completed"
+        
+        # Générer un résumé lisible
+        gosec -no-fail -fmt text -out results.txt ./... || echo "Text report generated"
+
+    - name: Parse security results
+      id: security-report
+      run: |
+        # Compter les issues par sévérité
+        HIGH_COUNT=$(jq '[.Issues[] | select(.severity == "HIGH")] | length' results.json 2>/dev/null || echo "0")
+        MEDIUM_COUNT=$(jq '[.Issues[] | select(.severity == "MEDIUM")] | length' results.json 2>/dev/null || echo "0")
+        LOW_COUNT=$(jq '[.Issues[] | select(.severity == "LOW")] | length' results.json 2>/dev/null || echo "0")
+        TOTAL_COUNT=$((HIGH_COUNT + MEDIUM_COUNT + LOW_COUNT))
+        
+        # Créer un résumé
+        if [ "$TOTAL_COUNT" -eq 0 ]; then
+          SUMMARY="✅ **Aucun problème de sécurité détecté**"
+          STATUS="✅ CLEAN"
+        else
+          SUMMARY="⚠️ **$TOTAL_COUNT problème(s) de sécurité détecté(s)**"
+          STATUS="⚠️ ISSUES FOUND"
+        fi
+        
+        # Créer les détails
+        DETAILS=""
+        if [ "$HIGH_COUNT" -gt 0 ]; then
+          DETAILS="${DETAILS}- 🔴 **Critique**: $HIGH_COUNT issue(s)\n"
+        fi
+        if [ "$MEDIUM_COUNT" -gt 0 ]; then
+          DETAILS="${DETAILS}- 🟡 **Moyen**: $MEDIUM_COUNT issue(s)\n"
+        fi
+        if [ "$LOW_COUNT" -gt 0 ]; then
+          DETAILS="${DETAILS}- 🟢 **Faible**: $LOW_COUNT issue(s)\n"
+        fi
+        
+        # Ajouter les règles les plus fréquentes
+        if [ "$TOTAL_COUNT" -gt 0 ]; then
+          echo "Top issues found:" >> security_summary.txt
+          jq -r '.Issues[] | .rule_id' results.json 2>/dev/null | sort | uniq -c | sort -nr | head -5 >> security_summary.txt || true
+        fi
+        
+        # Exporter pour les autres jobs
+        echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
+        echo "details<<EOF" >> $GITHUB_OUTPUT
+        echo -e "$DETAILS" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        echo "status=$STATUS" >> $GITHUB_OUTPUT
+        echo "total=$TOTAL_COUNT" >> $GITHUB_OUTPUT
+        echo "high=$HIGH_COUNT" >> $GITHUB_OUTPUT
+        echo "medium=$MEDIUM_COUNT" >> $GITHUB_OUTPUT
+        echo "low=$LOW_COUNT" >> $GITHUB_OUTPUT
 
     - name: Upload SARIF to GitHub Security
       uses: github/codeql-action/upload-sarif@v3
@@ -96,6 +148,8 @@ jobs:
         path: |
           results.json
           results.sarif
+          results.txt
+          security_summary.txt
 
   build-and-release:
     name: Build and Release
@@ -164,7 +218,13 @@ jobs:
         echo "$CHANGELOG" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
-    - name: Create release
+    - name: Download security results
+      uses: actions/download-artifact@v4
+      with:
+        name: security-results
+        path: security/
+
+    - name: Create release with security report
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.version.outputs.VERSION }}
@@ -173,6 +233,18 @@ jobs:
           ## ${{ steps.version.outputs.VERSION }}
           
           ${{ steps.changelog.outputs.CHANGELOG }}
+          
+          ## 🔒 Rapport de Sécurité
+          
+          ${{ needs.security.outputs.security-summary }}
+          
+          ### Détails du scan
+          ${{ needs.security.outputs.security-details }}
+          
+          **Status**: ${{ needs.security.outputs.status }}
+          
+          > 📊 Scan effectué avec [Gosec](https://github.com/securego/gosec)  
+          > 📋 Rapport complet disponible dans les [Security Insights](../../security/code-scanning)
           
           ### Downloads
           - **Linux AMD64**: `xks-linux-amd64-${{ steps.version.outputs.VERSION }}.tar.gz`
@@ -203,7 +275,10 @@ jobs:
           ```bash
           xks --version
           ```
-        files: dist/*.tar.gz,dist/*.zip
+        files: |
+          dist/*.tar.gz
+          dist/*.zip
+          security/results.json
         draft: false
         prerelease: false
       env:
