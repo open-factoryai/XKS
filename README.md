@@ -5,7 +5,12 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen)](https://github.com/open-factoryai/xks)
 
-**XKS** is a powerful CLI tool that wraps `az aks command invoke` for running `kubectl` and `Helm` commands securely inside private AKS clusters. It provides an enhanced experience with automatic authentication, intelligent file handling, and simplified command execution.
+|  ☀️ XKS CLI ☀️  | ⏬ Description ⏬ |
+|------|-------------|
+| ![XKS Logo](./resources/xkslogo.png) | **XKS** is a powerful CLI tool that wraps `az aks command invoke` for running `kubectl` and `Helm` commands securely inside private AKS clusters. It provides an enhanced experience with automatic authentication, intelligent file handling, and simplified command execution.|
+
+
+
 
 
 ## ✨ Features
