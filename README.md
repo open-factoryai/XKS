@@ -392,6 +392,19 @@ graph TD
   --wait
 ```
 
+## 💡 Tips And Trick
+
+```bash
+# You can create a shortcut by adding the following line to your ~/.zshrc or ~/.bash_profile after adding the xks tool in your PATH or in /usr/local/bin
+alias kubectl="xks kubectl"
+alias helm="xks helm"
+
+# then you can use directly kubectl or helm commands 
+kubectl get pods -A
+helm list
+
+```
+
 ## 🚨 Troubleshooting
 
 ### 🔐 Authentication Issues
