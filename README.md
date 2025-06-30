@@ -9,13 +9,9 @@
 |------|-------------|
 | ![XKS Logo](./resources/xkslogo.png) | **XKS** is a powerful CLI tool that wraps `az aks command invoke` for running `kubectl` and `Helm` commands securely inside private AKS clusters. It provides an enhanced experience with automatic authentication, intelligent file handling, and simplified command execution.|
 
-
-
-
-
 ## ✨ Features
 
-- 🔐 **Automatic Authentication** - Service principal login with credential caching
+- 🔐 **Flexible Authentication** - Interactive Azure login or Service principal authentication
 - 🚀 **Cluster Management** - Start, stop, and check cluster status
 - 📁 **Smart File Upload** - Automatic detection and upload of required files
 - 🎯 **Direct Command Execution** - Run kubectl/helm commands without Azure CLI syntax
@@ -27,7 +23,7 @@
 - Azure CLI (`az`) installed and configured
 - Go 1.21+ (for building from source)
 - Access to an AKS cluster with command invoke permissions
-- Azure Service Principal with appropriate permissions
+- **Either**: Interactive access to Azure CLI **OR** Azure Service Principal with appropriate permissions
 
 ## 🏗️ Installation
 
@@ -66,16 +62,37 @@ sudo mv xks /usr/local/bin/
 
 ## ⚙️ Configuration
 
-Create a `.env` file in your project directory:
+### 🔐 Authentication Methods
+
+XKS supports two authentication methods with automatic fallback:
+
+1. **Interactive Login** (Recommended) - Uses `az login`
+2. **Service Principal** - For automation and CI/CD
+
+#### Method 1: Interactive Authentication
+
+Simply ensure you're logged in with Azure CLI:
+
+```bash
+# Login to Azure (if not already done)
+az login
+
+# That's it! XKS will use your existing authentication
+./xks kubectl get pods
+```
+
+#### Method 2: Service Principal (Optional)
+
+Create a `.env` file for service principal authentication:
 
 ```env
-# Azure Service Principal
+# Azure Service Principal (optional - for automation)
 AZURE_TENANTID=your-tenant-id
 AZURE_APPID=your-app-id
 AZURE_SECRETID=your-secret
 AZURE_SUBSCRIPTION=your-subscription-id-or-name
 
-# AKS Cluster Info
+# AKS Cluster Info (required)
 AKS_RESOURCE_NAME=your-resource-group
 AKS_NAME=your-aks-cluster
 ```
@@ -84,12 +101,33 @@ AKS_NAME=your-aks-cluster
 
 | Variable | Description | Required | Example |
 |----------|-------------|----------|---------|
-| `AZURE_TENANTID` | Azure tenant ID | ✅ | `12345678-1234-1234-1234-123456789012` |
-| `AZURE_APPID` | Service principal application ID | ✅ | `87654321-4321-4321-4321-210987654321` |
-| `AZURE_SECRETID` | Service principal secret | ✅ | `your-secret-value` |
-| `AZURE_SUBSCRIPTION` | Azure subscription ID or name | ✅ | `My Production Subscription` |
 | `AKS_RESOURCE_NAME` | Resource group containing AKS cluster | ✅ | `my-rg-prod` |
 | `AKS_NAME` | AKS cluster name | ✅ | `my-aks-cluster` |
+| `AZURE_TENANTID` | Azure tenant ID | ⚡ Optional* | `12345678-1234-1234-1234-123456789012` |
+| `AZURE_APPID` | Service principal application ID | ⚡ Optional* | `87654321-4321-4321-4321-210987654321` |
+| `AZURE_SECRETID` | Service principal secret | ⚡ Optional* | `your-secret-value` |
+| `AZURE_SUBSCRIPTION` | Azure subscription ID or name | ⚡ Optional | `My Production Subscription` |
+
+*Required only for service principal authentication. XKS will first try interactive login, then fallback to service principal if configured.
+
+### 🔄 Authentication Flow
+
+XKS automatically handles authentication with this priority:
+
+1. **Check existing authentication** - Uses current `az login` session if valid
+2. **Interactive login** - Prompts for `az login` if not authenticated
+3. **Service principal fallback** - Uses `.env` credentials if interactive fails
+
+```bash
+# Example: First run triggers authentication
+./xks kubectl get pods
+# 🔐 Attempting interactive login...
+# ✅ Interactive login successful
+
+# Subsequent runs use cached authentication
+./xks kubectl get services
+# ✅ Already authenticated.
+```
 
 ## 🚀 Quick Start
 
@@ -305,7 +343,7 @@ XKS automatically detects and uploads files referenced in your commands:
 
 XKS consists of several key components:
 
-- **AuthClient**: Handles Azure authentication and credential management
+- **AuthClient**: Handles Azure authentication with interactive and service principal support
 - **ClusterManager**: Manages AKS cluster lifecycle (start/stop/status)
 - **CommandRunner**: Executes commands with intelligent file handling
 - **Config**: Manages environment configuration and validation
@@ -410,13 +448,19 @@ helm list
 ### 🔐 Authentication Issues
 
 ```bash
-# Test service principal credentials
+# Check current authentication status
+az account show
+
+# Re-authenticate if needed
+az login
+
+# For service principal issues, test credentials manually
 az login --service-principal \
   --username $AZURE_APPID \
   --password $AZURE_SECRETID \
   --tenant $AZURE_TENANTID
 
-# Verify permissions
+# Verify cluster access permissions
 az aks show --name $AKS_NAME --resource-group $AKS_RESOURCE_NAME
 ```
 
@@ -479,7 +523,7 @@ Enable comprehensive debugging:
 ## ⚠️ Limitations
 
 - Requires Azure CLI to be installed and accessible
-- Service principal must have `Azure Kubernetes Service Cluster User` role
+- User or service principal must have `Azure Kubernetes Service Cluster User` role
 - File uploads are limited by Azure's size restrictions (~4MB)
 - Commands are executed in the context of AKS cluster's command service
 - Network policies may affect certain kubectl operations
